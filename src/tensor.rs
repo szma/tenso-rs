@@ -82,7 +82,8 @@ impl Context {
                         // grad_a: reduce if a was broadcasted
                         let a_grad = if a_shape != grad.shape() {
                             // Sum over the batch dimension (axis 0) if shapes differ
-                            grad.sum_axis(ndarray::Axis(0)).insert_axis(ndarray::Axis(0))
+                            grad.sum_axis(ndarray::Axis(0))
+                                .insert_axis(ndarray::Axis(0))
                         } else {
                             grad.clone()
                         };
@@ -94,7 +95,8 @@ impl Context {
 
                         // grad_b: reduce if b was broadcasted
                         let b_grad = if b_shape != grad.shape() {
-                            grad.sum_axis(ndarray::Axis(0)).insert_axis(ndarray::Axis(0))
+                            grad.sum_axis(ndarray::Axis(0))
+                                .insert_axis(ndarray::Axis(0))
                         } else {
                             grad.clone()
                         };
@@ -114,7 +116,9 @@ impl Context {
 
                         // grad_a += grad * b (reduced if broadcasted)
                         let a_delta = if a_shape != a_delta_raw.shape() {
-                            a_delta_raw.sum_axis(ndarray::Axis(0)).insert_axis(ndarray::Axis(0))
+                            a_delta_raw
+                                .sum_axis(ndarray::Axis(0))
+                                .insert_axis(ndarray::Axis(0))
                         } else {
                             a_delta_raw
                         };
@@ -126,7 +130,9 @@ impl Context {
 
                         // grad_b += grad * a (reduced if broadcasted)
                         let b_delta = if b_shape != b_delta_raw.shape() {
-                            b_delta_raw.sum_axis(ndarray::Axis(0)).insert_axis(ndarray::Axis(0))
+                            b_delta_raw
+                                .sum_axis(ndarray::Axis(0))
+                                .insert_axis(ndarray::Axis(0))
                         } else {
                             b_delta_raw
                         };
@@ -206,7 +212,8 @@ impl Context {
 
                         // grad_a += grad (reduced if broadcasted)
                         let a_grad = if a_shape != grad.shape() {
-                            grad.sum_axis(ndarray::Axis(0)).insert_axis(ndarray::Axis(0))
+                            grad.sum_axis(ndarray::Axis(0))
+                                .insert_axis(ndarray::Axis(0))
                         } else {
                             grad.clone()
                         };
@@ -219,7 +226,9 @@ impl Context {
                         // grad_b -= grad (reduced if broadcasted)
                         let neg_grad = grad.mapv(|x| -x);
                         let b_grad = if b_shape != neg_grad.shape() {
-                            neg_grad.sum_axis(ndarray::Axis(0)).insert_axis(ndarray::Axis(0))
+                            neg_grad
+                                .sum_axis(ndarray::Axis(0))
+                                .insert_axis(ndarray::Axis(0))
                         } else {
                             neg_grad
                         };

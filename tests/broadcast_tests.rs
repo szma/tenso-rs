@@ -117,10 +117,7 @@ fn test_batch_size_4() {
     let ctx = Context::new();
     // Larger batch to ensure reduction works correctly
     // [4, 2] + [1, 2]
-    let a = ctx.tensor(
-        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-        &[4, 2],
-    );
+    let a = ctx.tensor(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[4, 2]);
     let b = ctx.tensor(&[10.0, 20.0], &[1, 2]);
 
     let c = a + b;
