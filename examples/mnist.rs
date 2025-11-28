@@ -29,7 +29,7 @@ fn main() {
     let ctx = Context::new();
 
     // Network: 784 -> 128 -> 10 (batch_size=1, no broadcasting needed)
-    let mlp = MLP::new(&ctx, &[784, 16, 10]);
+    let mlp = MLP::new(&ctx, &[784, 128, 10]);
     let params_count = ctx.len();
 
     let params = mlp.params();
