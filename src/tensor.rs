@@ -75,29 +75,61 @@ impl Context {
                 match tensors[i].op {
                     Op::None => {}
                     Op::Add(a, b) => {
-                        // grad_a += grad
+                        // Handle broadcasting: sum gradients over broadcasted dimensions
+                        let a_shape = tensors[a.0].data.shape().to_vec();
+                        let b_shape = tensors[b.0].data.shape().to_vec();
+
+                        // grad_a: reduce if a was broadcasted
+                        let a_grad = if a_shape != grad.shape() {
+                            // Sum over the batch dimension (axis 0) if shapes differ
+                            grad.sum_axis(ndarray::Axis(0)).insert_axis(ndarray::Axis(0))
+                        } else {
+                            grad.clone()
+                        };
                         if let Some(ref mut g) = tensors[a.0].grad {
-                            *g += &grad;
+                            *g += &a_grad;
                         } else {
-                            tensors[a.0].grad = Some(grad.clone());
+                            tensors[a.0].grad = Some(a_grad);
                         }
-                        // grad_b += grad
-                        if let Some(ref mut g) = tensors[b.0].grad {
-                            *g += &grad;
+
+                        // grad_b: reduce if b was broadcasted
+                        let b_grad = if b_shape != grad.shape() {
+                            grad.sum_axis(ndarray::Axis(0)).insert_axis(ndarray::Axis(0))
                         } else {
-                            tensors[b.0].grad = Some(grad.clone());
+                            grad.clone()
+                        };
+                        if let Some(ref mut g) = tensors[b.0].grad {
+                            *g += &b_grad;
+                        } else {
+                            tensors[b.0].grad = Some(b_grad);
                         }
                     }
                     Op::Mul(a, b) => {
-                        let a_delta = tensors[b.0].data.clone() * &grad;
-                        let b_delta = tensors[a.0].data.clone() * &grad;
+                        // Handle broadcasting: sum gradients over broadcasted dimensions
+                        let a_shape = tensors[a.0].data.shape().to_vec();
+                        let b_shape = tensors[b.0].data.shape().to_vec();
 
+                        let a_delta_raw = tensors[b.0].data.clone() * &grad;
+                        let b_delta_raw = tensors[a.0].data.clone() * &grad;
+
+                        // grad_a += grad * b (reduced if broadcasted)
+                        let a_delta = if a_shape != a_delta_raw.shape() {
+                            a_delta_raw.sum_axis(ndarray::Axis(0)).insert_axis(ndarray::Axis(0))
+                        } else {
+                            a_delta_raw
+                        };
                         if let Some(ref mut g) = tensors[a.0].grad {
                             *g += &a_delta;
                         } else {
                             tensors[a.0].grad = Some(a_delta);
                         }
-                        // grad_b += grad * a
+
+                        // grad_b += grad * a (reduced if broadcasted)
+                        let b_delta = if b_shape != b_delta_raw.shape() {
+                            b_delta_raw.sum_axis(ndarray::Axis(0)).insert_axis(ndarray::Axis(0))
+                        } else {
+                            b_delta_raw
+                        };
                         if let Some(ref mut g) = tensors[b.0].grad {
                             *g += &b_delta;
                         } else {
@@ -168,17 +200,33 @@ impl Context {
                         }
                     }
                     Op::Sub(a, b) => {
-                        // grad_a += grad, grad_b -= grad
+                        // Handle broadcasting: sum gradients over broadcasted dimensions
+                        let a_shape = tensors[a.0].data.shape().to_vec();
+                        let b_shape = tensors[b.0].data.shape().to_vec();
+
+                        // grad_a += grad (reduced if broadcasted)
+                        let a_grad = if a_shape != grad.shape() {
+                            grad.sum_axis(ndarray::Axis(0)).insert_axis(ndarray::Axis(0))
+                        } else {
+                            grad.clone()
+                        };
                         if let Some(ref mut g) = tensors[a.0].grad {
-                            *g += &grad;
+                            *g += &a_grad;
                         } else {
-                            tensors[a.0].grad = Some(grad.clone());
+                            tensors[a.0].grad = Some(a_grad);
                         }
+
+                        // grad_b -= grad (reduced if broadcasted)
                         let neg_grad = grad.mapv(|x| -x);
-                        if let Some(ref mut g) = tensors[b.0].grad {
-                            *g += &neg_grad;
+                        let b_grad = if b_shape != neg_grad.shape() {
+                            neg_grad.sum_axis(ndarray::Axis(0)).insert_axis(ndarray::Axis(0))
                         } else {
-                            tensors[b.0].grad = Some(neg_grad);
+                            neg_grad
+                        };
+                        if let Some(ref mut g) = tensors[b.0].grad {
+                            *g += &b_grad;
+                        } else {
+                            tensors[b.0].grad = Some(b_grad);
                         }
                     }
                     Op::Pow(a, exp) => {

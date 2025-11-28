@@ -41,43 +41,59 @@ fn main() {
     );
 
     let lr = 0.1;
-    let epochs = 10;
+    let epochs = 100;
+    let batch_size = 32;
     let num_train_samples = train.len();
     let num_test_samples = test.len();
 
     for epoch in 0..epochs {
         let mut total_loss = 0.0;
         let mut correct = 0;
+        let mut num_batches = 0;
 
-        for i in 0..num_train_samples {
-            // Single sample input [1, 784]
-            let input_data: Vec<f32> = train.images[i].iter().map(|&x| x as f32).collect();
-            let x = ctx.tensor(&input_data, &[1, 784]);
+        for batch_start in (0..num_train_samples).step_by(batch_size) {
+            let batch_end = (batch_start + batch_size).min(num_train_samples);
+            let current_batch_size = batch_end - batch_start;
 
-            // One-hot target [1, 10]
-            let mut target_data = vec![0.0f32; 10];
-            let label = train.labels[i] as usize;
-            target_data[label] = 1.0;
-            let y_true = ctx.tensor(&target_data, &[1, 10]);
+            // Build batch tensors [batch_size, 784] and [batch_size, 10]
+            let mut input_data = Vec::with_capacity(current_batch_size * 784);
+            let mut target_data = Vec::with_capacity(current_batch_size * 10);
+            let mut batch_labels = Vec::with_capacity(current_batch_size);
+
+            for i in batch_start..batch_end {
+                input_data.extend(train.images[i].iter().map(|&x| x as f32));
+
+                let label = train.labels[i] as usize;
+                batch_labels.push(label);
+                let mut one_hot = vec![0.0f32; 10];
+                one_hot[label] = 1.0;
+                target_data.extend(one_hot);
+            }
+
+            let x = ctx.tensor(&input_data, &[current_batch_size, 784]);
+            let y_true = ctx.tensor(&target_data, &[current_batch_size, 10]);
 
             // Forward pass
             let logits = mlp.forward(x);
 
-            // MSE loss
+            // MSE loss (mean over batch)
             let loss = (logits - y_true).pow(2.0).mean();
             total_loss += loss.data()[[0]];
+            num_batches += 1;
 
             // Track accuracy
             let logits_data = logits.data();
-            let pred = (0..10)
-                .max_by(|&a, &b| {
-                    logits_data[[0, a]]
-                        .partial_cmp(&logits_data[[0, b]])
-                        .unwrap()
-                })
-                .unwrap();
-            if pred == label {
-                correct += 1;
+            for b in 0..current_batch_size {
+                let pred = (0..10)
+                    .max_by(|&a, &b_idx| {
+                        logits_data[[b, a]]
+                            .partial_cmp(&logits_data[[b, b_idx]])
+                            .unwrap()
+                    })
+                    .unwrap();
+                if pred == batch_labels[b] {
+                    correct += 1;
+                }
             }
 
             // Backward pass
@@ -95,28 +111,36 @@ fn main() {
         println!(
             "Epoch {}: Loss = {:.4}, Train Accuracy = {:.2}%",
             epoch + 1,
-            total_loss / num_train_samples as f32,
+            total_loss / num_batches as f32,
             accuracy
         );
 
         // Test accuracy
         let mut test_correct = 0;
-        for i in 0..num_test_samples {
-            let input_data: Vec<f32> = test.images[i].iter().map(|&x| x as f32).collect();
-            let x = ctx.tensor(&input_data, &[1, 784]);
+        for batch_start in (0..num_test_samples).step_by(batch_size) {
+            let batch_end = (batch_start + batch_size).min(num_test_samples);
+            let current_batch_size = batch_end - batch_start;
 
+            let mut input_data = Vec::with_capacity(current_batch_size * 784);
+            for i in batch_start..batch_end {
+                input_data.extend(test.images[i].iter().map(|&x| x as f32));
+            }
+
+            let x = ctx.tensor(&input_data, &[current_batch_size, 784]);
             let logits = mlp.forward(x);
             let logits_data = logits.data();
 
-            let pred = (0..10)
-                .max_by(|&a, &b| {
-                    logits_data[[0, a]]
-                        .partial_cmp(&logits_data[[0, b]])
-                        .unwrap()
-                })
-                .unwrap();
-            if pred == test.labels[i] as usize {
-                test_correct += 1;
+            for b in 0..current_batch_size {
+                let pred = (0..10)
+                    .max_by(|&a, &b_idx| {
+                        logits_data[[b, a]]
+                            .partial_cmp(&logits_data[[b, b_idx]])
+                            .unwrap()
+                    })
+                    .unwrap();
+                if pred == test.labels[batch_start + b] as usize {
+                    test_correct += 1;
+                }
             }
 
             ctx.prune(params_count);
