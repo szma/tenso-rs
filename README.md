@@ -11,8 +11,7 @@ Minimal autograd library in Rust for neural networks.
 ## Example
 
 ```rust
-use tenso_rs::nn::MLP;
-use tenso_rs::tensor::Context;
+use tenso_rs::{Context, MLP, sgd_step};
 
 fn main() {
     let ctx = Context::new();
@@ -29,13 +28,7 @@ fn main() {
         let y_pred = mlp.forward(x);
         let loss = (y_pred - y_true).pow(2.0).sum();
         loss.backward();
-
-        // SGD update
-        for p in mlp.params() {
-            if let Some(grad) = p.grad() {
-                p.set_data(p.data() - &(grad * 0.5));
-            }
-        }
+        sgd_step(&mlp.params(), 0.5);
     }
 }
 ```
