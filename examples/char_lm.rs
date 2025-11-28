@@ -45,7 +45,11 @@ impl Vocab {
 
 /// Create training data: (context, next_char) pairs
 /// Context is a window of characters, target is the next character
-fn create_training_data(text: &str, context_size: usize, vocab: &Vocab) -> (Vec<Vec<f32>>, Vec<usize>) {
+fn create_training_data(
+    text: &str,
+    context_size: usize,
+    vocab: &Vocab,
+) -> (Vec<Vec<f32>>, Vec<usize>) {
     let chars: Vec<char> = text.chars().collect();
     let mut inputs = Vec::new();
     let mut targets = Vec::new();
@@ -227,7 +231,7 @@ fn main() {
     let seeds = ["hel", "hi ", "wor", " wo"];
 
     for seed in seeds {
-        print!("Seed '{}' -> \"{}",seed, seed);
+        print!("Seed '{}' -> \"{}", seed, seed);
 
         let mut context: Vec<char> = seed.chars().collect();
 
@@ -235,7 +239,14 @@ fn main() {
         for _ in 0..20 {
             // Build input from current context
             let mut input = Vec::new();
-            for &c in context.iter().rev().take(context_size).collect::<Vec<_>>().iter().rev() {
+            for &c in context
+                .iter()
+                .rev()
+                .take(context_size)
+                .collect::<Vec<_>>()
+                .iter()
+                .rev()
+            {
                 input.extend(vocab.one_hot(*c));
             }
 
