@@ -155,6 +155,18 @@ impl Context {
                             tensors[a.0].grad = Some(a_delta);
                         }
                     }
+                    Op::Mean(a, n) => {
+                        // grad is a scalar, distributed to all elements divided by n
+                        let scalar = grad[[0]] / n as f32;
+                        let a_shape = tensors[a.0].data.shape().to_vec();
+                        let a_delta = ArrayD::from_elem(a_shape, scalar);
+
+                        if let Some(ref mut g) = tensors[a.0].grad {
+                            *g += &a_delta;
+                        } else {
+                            tensors[a.0].grad = Some(a_delta);
+                        }
+                    }
                     Op::Sub(a, b) => {
                         // grad_a += grad, grad_b -= grad
                         if let Some(ref mut g) = tensors[a.0].grad {
@@ -203,6 +215,7 @@ enum Op {
     MatMul(TensorIdx, TensorIdx),
     ReLU(TensorIdx),
     Sum(TensorIdx),
+    Mean(TensorIdx, usize), // stores input idx and number of elements
     Pow(TensorIdx, f32),
 }
 
@@ -252,6 +265,26 @@ impl<'a> Tensor<'a> {
             data: result_data,
             grad: None,
             op: Op::Sum(self.idx),
+        });
+
+        Tensor { idx, ctx: self.ctx }
+    }
+
+    pub fn mean(&self) -> Tensor<'a> {
+        let (result_data, n) = {
+            let tensors = self.ctx.tensors.borrow();
+            let data = &tensors[self.idx.0].data;
+            let n = data.len();
+            let mean = data.sum() / n as f32;
+            (ArrayD::from_elem(vec![1], mean), n)
+        };
+
+        let mut tensors = self.ctx.tensors.borrow_mut();
+        let idx = TensorIdx(tensors.len());
+        tensors.push(TensorData {
+            data: result_data,
+            grad: None,
+            op: Op::Mean(self.idx, n),
         });
 
         Tensor { idx, ctx: self.ctx }
