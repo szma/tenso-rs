@@ -1,4 +1,4 @@
-use crate::tensor::{matmul, Context, Tensor};
+use crate::tensor::{Context, Tensor, matmul};
 use rand::Rng;
 
 /// A fully connected (linear) layer: y = x @ W + b

@@ -34,7 +34,11 @@ fn main() {
 
     let params = mlp.params();
     let total_params: usize = params.iter().map(|p| p.data().len()).sum();
-    println!("Model has {} parameter tensors ({} total weights)", params.len(), total_params);
+    println!(
+        "Model has {} parameter tensors ({} total weights)",
+        params.len(),
+        total_params
+    );
 
     let lr = 0.1;
     let epochs = 10;
