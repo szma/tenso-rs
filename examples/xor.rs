@@ -1,14 +1,4 @@
-use tenso_rs::nn::MLP;
-use tenso_rs::tensor::{Context, Tensor};
-
-fn sgd_step(params: &[Tensor], lr: f32) {
-    for p in params {
-        if let Some(grad) = p.grad() {
-            let new_data = p.data() - &(grad * lr);
-            p.set_data(new_data);
-        }
-    }
-}
+use tenso_rs::{Context, MLP, sgd_step};
 
 fn main() {
     let ctx = Context::new();
@@ -23,6 +13,9 @@ fn main() {
     let mlp = MLP::new(&ctx, &[2, 4, 1]);
     let lr = 0.05;
 
+    // Remember how many tensors are parameters (to prune intermediates later)
+    let params_count = ctx.len();
+
     for epoch in 0..100 {
         ctx.zero_grad();
 
@@ -36,6 +29,9 @@ fn main() {
         }
 
         sgd_step(&mlp.params(), lr);
+
+        // Prune intermediate tensors, keep only parameters
+        ctx.prune(params_count);
     }
 
     // Final prediction

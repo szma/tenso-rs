@@ -1,4 +1,4 @@
-use tenso_rs::tensor::{Context, matmul};
+use tenso_rs::{Context, matmul};
 fn main() {
     let ctx = Context::new();
     let w = ctx.tensor(&[1., 2., 3., 4., 5., 6.], &[3, 2]);

@@ -12,17 +12,43 @@ pub struct Context {
     tensors: RefCell<Vec<TensorData>>,
 }
 
-impl Context {
-    pub fn new() -> Self {
+impl Default for Context {
+    fn default() -> Self {
         Self {
             tensors: RefCell::new(Vec::new()),
         }
+    }
+}
+
+impl Context {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn zero_grad(&self) {
         for t in self.tensors.borrow_mut().iter_mut() {
             t.grad = None;
         }
+    }
+
+    /// Prune all tensors after the given index, keeping only the first `keep` tensors.
+    /// Use this to remove intermediate computation tensors while preserving parameters.
+    /// Returns the number of pruned tensors.
+    pub fn prune(&self, keep: usize) -> usize {
+        let mut tensors = self.tensors.borrow_mut();
+        let old_len = tensors.len();
+        tensors.truncate(keep);
+        old_len - keep
+    }
+
+    /// Returns the current number of tensors in the arena.
+    pub fn len(&self) -> usize {
+        self.tensors.borrow().len()
+    }
+
+    /// Returns true if the arena contains no tensors.
+    pub fn is_empty(&self) -> bool {
+        self.tensors.borrow().is_empty()
     }
 
     pub fn tensor(&self, data: &[f32], shape: &[usize]) -> Tensor<'_> {
