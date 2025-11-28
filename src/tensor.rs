@@ -248,6 +248,100 @@ impl Context {
                             tensors[a.0].grad = Some(a_delta);
                         }
                     }
+                    Op::Scale(a, scalar) => {
+                        // d/dx(x * c) = c
+                        let a_delta = grad.mapv(|g| g * scalar);
+
+                        if let Some(ref mut g) = tensors[a.0].grad {
+                            *g += &a_delta;
+                        } else {
+                            tensors[a.0].grad = Some(a_delta);
+                        }
+                    }
+                    Op::Exp(a) => {
+                        // d/dx(e^x) = e^x = output
+                        let a_delta = &tensors[i].data * &grad;
+
+                        if let Some(ref mut g) = tensors[a.0].grad {
+                            *g += &a_delta;
+                        } else {
+                            tensors[a.0].grad = Some(a_delta);
+                        }
+                    }
+                    Op::Softmax(a) => {
+                        // softmax backward: grad_input = softmax * (grad - sum(grad * softmax))
+                        let softmax_out = &tensors[i].data;
+                        let shape = softmax_out.shape();
+                        let rows = shape[0];
+                        let cols = shape[1];
+                        let mut a_delta = softmax_out.clone();
+
+                        for row in 0..rows {
+                            // sum(grad * softmax) for this row
+                            let dot: f32 = (0..cols)
+                                .map(|j| grad[[row, j]] * softmax_out[[row, j]])
+                                .sum();
+                            for j in 0..cols {
+                                a_delta[[row, j]] = softmax_out[[row, j]] * (grad[[row, j]] - dot);
+                            }
+                        }
+
+                        if let Some(ref mut g) = tensors[a.0].grad {
+                            *g += &a_delta;
+                        } else {
+                            tensors[a.0].grad = Some(a_delta);
+                        }
+                    }
+                    Op::LayerNorm(a, eps) => {
+                        // LayerNorm backward is complex but well-defined
+                        // y = (x - mean) / std
+                        // We need to compute dx given dy (grad)
+                        let input = &tensors[a.0].data;
+                        let shape = input.shape();
+                        let rows = shape[0];
+                        let cols = shape[1];
+                        let n = cols as f32;
+                        let mut a_delta = input.clone();
+
+                        for row in 0..rows {
+                            // Recompute mean and std for this row
+                            let mean: f32 = (0..cols).map(|j| input[[row, j]]).sum::<f32>() / n;
+                            let var: f32 = (0..cols)
+                                .map(|j| (input[[row, j]] - mean).powi(2))
+                                .sum::<f32>()
+                                / n;
+                            let std = (var + eps).sqrt();
+
+                            // Compute intermediate terms
+                            let dy_sum: f32 = (0..cols).map(|j| grad[[row, j]]).sum();
+                            let dy_xhat_sum: f32 = (0..cols)
+                                .map(|j| grad[[row, j]] * (input[[row, j]] - mean) / std)
+                                .sum();
+
+                            for j in 0..cols {
+                                let x_hat = (input[[row, j]] - mean) / std;
+                                a_delta[[row, j]] = (1.0 / std)
+                                    * (grad[[row, j]] - dy_sum / n - x_hat * dy_xhat_sum / n);
+                            }
+                        }
+
+                        if let Some(ref mut g) = tensors[a.0].grad {
+                            *g += &a_delta;
+                        } else {
+                            tensors[a.0].grad = Some(a_delta);
+                        }
+                    }
+                    Op::Transpose(a) => {
+                        // Transpose backward: just transpose the gradient back
+                        let grad_2d = grad.view().into_dimensionality::<ndarray::Ix2>().unwrap();
+                        let a_delta = grad_2d.t().to_owned().into_dyn();
+
+                        if let Some(ref mut g) = tensors[a.0].grad {
+                            *g += &a_delta;
+                        } else {
+                            tensors[a.0].grad = Some(a_delta);
+                        }
+                    }
                 }
             }
         }
@@ -274,6 +368,11 @@ enum Op {
     Sum(TensorIdx),
     Mean(TensorIdx, usize), // stores input idx and number of elements
     Pow(TensorIdx, f32),
+    Scale(TensorIdx, f32),
+    Exp(TensorIdx),
+    Softmax(TensorIdx),        // row-wise softmax
+    LayerNorm(TensorIdx, f32), // eps for numerical stability
+    Transpose(TensorIdx),
 }
 
 #[derive(Debug)]
@@ -359,6 +458,135 @@ impl<'a> Tensor<'a> {
             data: result_data,
             grad: None,
             op: Op::Pow(self.idx, exp),
+        });
+
+        Tensor { idx, ctx: self.ctx }
+    }
+
+    pub fn scale(&self, scalar: f32) -> Tensor<'a> {
+        let result_data = {
+            let tensors = self.ctx.tensors.borrow();
+            tensors[self.idx.0].data.mapv(|x| x * scalar)
+        };
+
+        let mut tensors = self.ctx.tensors.borrow_mut();
+        let idx = TensorIdx(tensors.len());
+        tensors.push(TensorData {
+            data: result_data,
+            grad: None,
+            op: Op::Scale(self.idx, scalar),
+        });
+
+        Tensor { idx, ctx: self.ctx }
+    }
+
+    pub fn exp(&self) -> Tensor<'a> {
+        let result_data = {
+            let tensors = self.ctx.tensors.borrow();
+            tensors[self.idx.0].data.mapv(|x| x.exp())
+        };
+
+        let mut tensors = self.ctx.tensors.borrow_mut();
+        let idx = TensorIdx(tensors.len());
+        tensors.push(TensorData {
+            data: result_data,
+            grad: None,
+            op: Op::Exp(self.idx),
+        });
+
+        Tensor { idx, ctx: self.ctx }
+    }
+
+    /// Row-wise softmax: softmax(x)_ij = exp(x_ij) / sum_k(exp(x_ik))
+    pub fn softmax(&self) -> Tensor<'a> {
+        let result_data = {
+            let tensors = self.ctx.tensors.borrow();
+            let data = &tensors[self.idx.0].data;
+            // Numerically stable softmax: subtract max per row
+            let shape = data.shape();
+            let rows = shape[0];
+            let cols = shape[1];
+            let mut result = data.clone();
+            for i in 0..rows {
+                let row_max = (0..cols)
+                    .map(|j| result[[i, j]])
+                    .fold(f32::NEG_INFINITY, f32::max);
+                let mut row_sum = 0.0;
+                for j in 0..cols {
+                    result[[i, j]] = (result[[i, j]] - row_max).exp();
+                    row_sum += result[[i, j]];
+                }
+                for j in 0..cols {
+                    result[[i, j]] /= row_sum;
+                }
+            }
+            result
+        };
+
+        let mut tensors = self.ctx.tensors.borrow_mut();
+        let idx = TensorIdx(tensors.len());
+        tensors.push(TensorData {
+            data: result_data,
+            grad: None,
+            op: Op::Softmax(self.idx),
+        });
+
+        Tensor { idx, ctx: self.ctx }
+    }
+
+    /// Layer normalization over the last dimension (features)
+    /// Normalizes each row to have mean=0 and std=1
+    pub fn layer_norm(&self, eps: f32) -> Tensor<'a> {
+        let result_data = {
+            let tensors = self.ctx.tensors.borrow();
+            let data = &tensors[self.idx.0].data;
+            let shape = data.shape();
+            let rows = shape[0];
+            let cols = shape[1];
+            let mut result = data.clone();
+            for i in 0..rows {
+                // Compute mean
+                let mean: f32 = (0..cols).map(|j| result[[i, j]]).sum::<f32>() / cols as f32;
+                // Compute variance
+                let var: f32 = (0..cols)
+                    .map(|j| (result[[i, j]] - mean).powi(2))
+                    .sum::<f32>()
+                    / cols as f32;
+                let std = (var + eps).sqrt();
+                // Normalize
+                for j in 0..cols {
+                    result[[i, j]] = (result[[i, j]] - mean) / std;
+                }
+            }
+            result
+        };
+
+        let mut tensors = self.ctx.tensors.borrow_mut();
+        let idx = TensorIdx(tensors.len());
+        tensors.push(TensorData {
+            data: result_data,
+            grad: None,
+            op: Op::LayerNorm(self.idx, eps),
+        });
+
+        Tensor { idx, ctx: self.ctx }
+    }
+
+    /// Transpose a 2D tensor (swap rows and columns)
+    pub fn transpose(&self) -> Tensor<'a> {
+        let result_data = {
+            let tensors = self.ctx.tensors.borrow();
+            let data = &tensors[self.idx.0].data;
+            let view_2d = data.view().into_dimensionality::<ndarray::Ix2>().unwrap();
+            view_2d.t().to_owned().into_dyn()
+        };
+
+        let mut tensors = self.ctx.tensors.borrow_mut();
+        let idx = TensorIdx(tensors.len());
+        tensors.push(TensorData {
+            data: result_data,
+            grad: None,
+            op: Op::Transpose(self.idx),
         });
 
         Tensor { idx, ctx: self.ctx }

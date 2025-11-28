@@ -5,8 +5,8 @@ Minimal autograd library in Rust for neural networks.
 ## Features
 
 - Automatic differentiation (backpropagation)
-- Tensor operations: `+`, `-`, `*`, `matmul`, `relu`, `pow`, `sum`
-- Neural network layers: `Linear`, `MLP`
+- Tensor operations: `+`, `-`, `*`, `matmul`, `relu`, `pow`, `sum`, `mean`, `exp`, `transpose`, `layer_norm`, `scale` (multiplication with scalar), `softmax`
+- Neural network layers: `Linear`, `MLP`, `TransformerBlock`
 
 ## Example
 
@@ -36,5 +36,5 @@ fn main() {
 ## Run
 
 ```bash
-cargo run --example xor
+cargo run --example xor # mnist, transfomer
 ```
